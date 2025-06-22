@@ -1,0 +1,83 @@
+record(bo, "$(P)GPIO$(N)_OUT")
+{
+    field(DTYP, "devGpio")
+    field(OUT, "@$(CHIP),$(N)")
+    field(ZNAM, "OFF")
+    field(ONAM, "ON")
+}
+
+record(bi, "$(P)GPIO$(N)_IN")
+{
+    field(DTYP, "devGpio")
+    field(INP, "@$(CHIP),$(N)")
+    field(ZNAM, "OFF")
+    field(ONAM, "ON")
+}
+
+record(mbbo, "$(P)GPIO$(N)_POLARITY")
+{
+    field(DTYP, "devGpioCfg")
+    field(DESC, "Polarity for output pins")
+    field(OUT, "@$(CHIP),$(N),polarity")
+    field(VAL, "0")
+    field(ZRST, "Active High")
+    field(ZRVL, "0")
+    field(ONST, "Active Low")
+    field(ONVL, "1")
+    field(PINI, "YES")
+}
+
+record(mbbo, "$(P)GPIO$(N)_TYPE")
+{
+    field(DTYP, "devGpioCfg")
+    field(DESC, "Pin type: output or input")
+    field(OUT, "@$(CHIP),$(N),type")
+    field(VAL, "0")
+    field(ZRST, "Input")
+    field(ZRVL, "0")
+    field(ONST, "Output")
+    field(ONVL, "1")
+    field(PINI, "YES")
+}
+
+record(mbbo, "$(P)GPIO$(N)_EDGE")
+{
+    field(DTYP, "devGpioCfg")
+    field(DESC, "Edge type for input pins")
+    field(OUT, "@$(CHIP),$(N),edge")
+    field(VAL, "0")
+    field(ZRST, "Rising")
+    field(ZRVL, "0")
+    field(ONST, "Falling")
+    field(ONVL, "1")
+    field(PINI, "YES")
+}
+
+record(mbbo, "$(P)GPIO$(N)_DRIVE")
+{
+    field(DTYP, "devGpioCfg")
+    field(DESC, "Drive for output pins")
+    field(OUT, "@$(CHIP),$(N),drive")
+    field(VAL, "0")
+    field(ZRST, "Push/Pull")
+    field(ZRVL, "0")
+    field(ONST, "Open Source")
+    field(ONVL, "1")
+    field(TWST, "Open Drain")
+    field(TWVL, "2")
+    field(PINI, "YES")
+}
+
+record(mbbo, "$(P)GPIO$(N)_BIAS")
+{
+    field(DTYP, "devGpioCfg")
+    field(DESC, "Bias for inputs (pull up/down)")
+    field(OUT, "@$(CHIP),$(N),bias")
+    field(VAL, "0")
+    field(ZRST, "None")
+    field(ZRVL, "0")
+    field(ONST, "Pull Down")
+    field(ONVL, "1")
+    field(TWST, "Pull Up")
+    field(TWVL, "1")
+}

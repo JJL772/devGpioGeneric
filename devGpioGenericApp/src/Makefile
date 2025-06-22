@@ -20,7 +20,7 @@ LIBRARY_IOC += devGpioGeneric
 DBD += devGpioGeneric.dbd
 
 # specify all source files to be compiled and added to the library
-#devGpioGeneric_SRCS += xxx
+devGpioGeneric_SRCS += devGpio.cpp
 
 devGpioGeneric_LIBS += $(EPICS_BASE_IOC_LIBS)
 

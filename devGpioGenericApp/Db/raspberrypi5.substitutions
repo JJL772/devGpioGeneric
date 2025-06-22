@@ -1,0 +1,32 @@
+
+# Exposes GPIO0-27 on the raspberry pi 5
+file pin.template {
+    pattern { N,        CHIP }
+            { 0,        "/dev/gpiochip0" }
+            { 1,        "/dev/gpiochip0" }
+            { 2,        "/dev/gpiochip0" }
+            { 3,        "/dev/gpiochip0" }
+            { 4,        "/dev/gpiochip0" }
+            { 5,        "/dev/gpiochip0" }
+            { 6,        "/dev/gpiochip0" }
+            { 7,        "/dev/gpiochip0" }
+            { 8,        "/dev/gpiochip0" }
+            { 10,       "/dev/gpiochip0" }
+            { 11,       "/dev/gpiochip0" }
+            { 12,        "/dev/gpiochip0" }
+            { 13,        "/dev/gpiochip0" }
+            { 14,        "/dev/gpiochip0" }
+            { 15,        "/dev/gpiochip0" }
+            { 16,        "/dev/gpiochip0" }
+            { 17,        "/dev/gpiochip0" }
+            { 18,        "/dev/gpiochip0" }
+            { 19,        "/dev/gpiochip0" }
+            { 20,        "/dev/gpiochip0" }
+            { 21,        "/dev/gpiochip0" }
+            { 22,        "/dev/gpiochip0" }
+            { 23,        "/dev/gpiochip0" }
+            { 24,        "/dev/gpiochip0" }
+            { 25,        "/dev/gpiochip0" }
+            { 26,        "/dev/gpiochip0" }
+            { 27,        "/dev/gpiochip0" }
+}

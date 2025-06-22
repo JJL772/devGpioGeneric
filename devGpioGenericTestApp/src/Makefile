@@ -20,10 +20,10 @@ DBD += devGpioGenericTest.dbd
 devGpioGenericTest_DBD += base.dbd
 
 # Include dbd files from all support applications:
-#devGpioGenericTest_DBD += xxx.dbd
+devGpioGenericTest_DBD += devGpioGeneric.dbd
 
 # Add all the support libraries needed by this IOC
-#devGpioGenericTest_LIBS += xxx
+devGpioGenericTest_LIBS += devGpioGeneric
 
 # devGpioGenericTest_registerRecordDeviceDriver.cpp derives from devGpioGenericTest.dbd
 devGpioGenericTest_SRCS += devGpioGenericTest_registerRecordDeviceDriver.cpp

@@ -8,3 +8,9 @@
 #driver(myDriver)
 #registrar(myRegistrar)
 #variable(myVariable)
+
+device(bi, INST_IO, devGpioBi, "devGpio")
+device(bo, INST_IO, devGpioBo, "devGpio")
+device(mbbo, INST_IO, devGpioCfgMbbo, "devGpioCfg")
+
+registrar(devGpioRegister)

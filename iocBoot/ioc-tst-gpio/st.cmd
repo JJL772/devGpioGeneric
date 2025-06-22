@@ -15,8 +15,8 @@ cd "${TOP}"
 dbLoadDatabase "dbd/devGpioGenericTest.dbd"
 devGpioGenericTest_registerRecordDeviceDriver pdbbase
 
-## Load record instances
-#dbLoadRecords("db/devGpioGenericTest.db","user=jeremy")
+# Load record instances
+dbLoadRecords("db/raspberrypi5.db","P=TEST:")
 
 cd "${TOP}/iocBoot/${IOC}"
 iocInit

@@ -34,3 +34,6 @@ O.*/
 *.log
 .*.swp
 .DS_Store
+/.cache/
+compile_commands.json
+RELEASE_SITE
