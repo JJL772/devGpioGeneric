@@ -13,6 +13,7 @@
 #include <recGbl.h>
 #include <alarm.h>
 #include <drvSup.h>
+#include <epicsThread.h>
 
 #include <linux/gpio.h>
 #include <fcntl.h>
@@ -360,6 +361,23 @@ devGpioBi_InitRecord(dbCommon* precord)
 static long
 devGpioBi_Read(biRecord* precord)
 {
+  auto* dpvt = dpvt_get(precord);
+  auto& p = dpvt->chip->pins[dpvt->pin];
+  if (p.type != GPIO_TYPE_INPUT)
+    return 0; /* silently eat the error because we could have a scan rate */
+
+  struct gpio_v2_line_values req = {};
+  req.bits = 1<<p.num;
+  req.mask = 1<<p.num;
+
+  if (ioctl(p.fd, GPIO_V2_LINE_GET_VALUES_IOCTL, &req) < 0) {
+    recGblSetSevrMsg(precord, COMM_ALARM, MAJOR_ALARM, "%s", strerror(errno));
+    perror("ioctl(GPIO_V2_LINE_GET_VALUES_IOCTL)");
+    return -1;
+  }
+
+  precord->rval = req.bits >> p.num;
+
   return 0;
 }
 
@@ -408,16 +426,18 @@ static long
 devGpioBo_Write(boRecord* precord)
 {
   auto* dpvt = dpvt_get(precord);
+  auto& p = dpvt->chip->pins[dpvt->pin];
+  if (p.type != GPIO_TYPE_OUTPUT)
+    return -1;
 
   struct gpio_v2_line_values req = {};
-  const int num = dpvt->chip->pins[dpvt->pin].num;
-  req.mask = 1 << num;
-  req.bits = precord->val << num;
+  req.mask = 1 << p.num;
+  req.bits = precord->val << p.num;
 
-  if (ioctl(dpvt->chip->pins[dpvt->pin].fd, GPIO_V2_LINE_SET_VALUES_IOCTL, &req) < 0) {
-    recGblSetSevr(precord, COMM_ALARM, MAJOR_ALARM);
+  if (ioctl(p.fd, GPIO_V2_LINE_SET_VALUES_IOCTL, &req) < 0) {
+    recGblSetSevrMsg(precord, COMM_ALARM, MAJOR_ALARM, "%s", strerror(errno));
     perror("ioctl(GPIO_V2_LINE_SET_VALUES_IOCTL)");
-    return S_dev_badSignal;
+    return -1;
   }
 
   return 0;
@@ -531,10 +551,3 @@ devGpioCfgMbbo_WriteRecord(mbboRecord* precord)
 
   return 0;
 }
-
-
-void devGpioRegister()
-{
-}
-
-epicsExportRegistrar(devGpioRegister);

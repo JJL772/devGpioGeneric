@@ -1,16 +1,4 @@
-# SPDX-FileCopyrightText: 2003 Argonne National Laboratory
-#
-# SPDX-License-Identifier: EPICS
-
-# provide definitions such as
-#include "xxxRecord.dbd"
-#device(xxx,CONSTANT,devXxxSoft,"SoftChannel")
-#driver(myDriver)
-#registrar(myRegistrar)
-#variable(myVariable)
 
 device(bi, INST_IO, devGpioBi, "devGpio")
 device(bo, INST_IO, devGpioBo, "devGpio")
 device(mbbo, INST_IO, devGpioCfgMbbo, "devGpioCfg")
-
-registrar(devGpioRegister)
