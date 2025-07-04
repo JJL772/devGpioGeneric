@@ -26,6 +26,10 @@
 #include <alarm.h>
 #include <drvSup.h>
 #include <epicsThread.h>
+#include <dbScan.h>
+#include <epicsAtomic.h>
+#include <iocInit.h>
+#include <initHooks.h>
 
 #include <linux/gpio.h>
 #include <fcntl.h>
@@ -36,10 +40,13 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
+#include <poll.h>
 
 #include <map>
 #include <string>
 #include <vector>
+
+#define MAX_PINS_PER_CHIP 32
 
 enum gpio_polarity {
   GPIO_ACTIVE_HIGH = 0,
@@ -69,21 +76,31 @@ enum gpio_drive {
 };
 
 struct gpio_pin {
-  int fd; /* fd for I/O */
-  int num; /* index into offsets[] array */
-  int line; /* actual line number */
-  enum gpio_polarity polarity;
-  enum gpio_type type;
-  enum gpio_edge edge;
-  enum gpio_bias bias;
-  enum gpio_drive drive;
+  int fd = -1; /* fd for I/O */
+  int num {}; /* index into offsets[] array */
+  int line {}; /* actual line number */
+  enum {
+    VAL_NONE = 0,
+    VAL_ON = 0x1,      /* currently 'high' */
+    VAL_RISING = 0x2,  /* rising edge detected */
+    VAL_FALLING = 0x4, /* falling edge detected */
+  };
+  int value = VAL_NONE;  /* value, set by watch events */
+  enum gpio_polarity polarity = GPIO_ACTIVE_HIGH;
+  enum gpio_type type = GPIO_TYPE_INPUT;
+  enum gpio_edge edge = GPIO_EDGE_RISING;
+  enum gpio_bias bias = GPIO_BIAS_NONE;
+  enum gpio_drive drive = GPIO_DRIVE_PUSH_PULL;
+  uint64_t ts;         /* hardware/kernel timestamp */
 };
 
 struct gpio_chip {
   int fd;
   int num_lines;
   bool failed; /* set once we've tried to init and failed */
-  std::vector<gpio_pin> pins;
+  IOSCANPVT scan; /* trigger record processing when events happen */
+  epicsThreadId thread;
+  gpio_pin pins[MAX_PINS_PER_CHIP];
 };
 
 struct gpio_dpvt {
@@ -106,6 +123,8 @@ struct gpio_cfg_dpvt {
 };
 
 static std::map<std::string, gpio_chip*> s_chips;
+
+static void gpio_thread_proc(void* param);
 
 /**
  * Create a new gpio_chip object for the chip at the specified location in /dev
@@ -134,27 +153,30 @@ gpio_init_chip(const std::string& chip)
   }
 
   pchip->num_lines = info.lines;
+
+  /* Init ioscan for the inputs */
+  scanIoInit(&pchip->scan);
+
   return pchip;
 }
 
 static int
-gpio_find_or_add_pin(gpio_chip* chip, int line, enum gpio_type type)
+gpio_find_or_add_pin(gpio_chip* chip, int line)
 {
-  /* try to find existing */
-  for (int i = 0; i < chip->pins.size(); ++i) {
-    if (chip->pins[i].line == line)
-      return i;
-  }
+  assert(line < MAX_PINS_PER_CHIP && line >= 0);
 
-  struct gpio_pin pin = {};
-  pin.type = type;
+  /* try to find existing */
+  auto& pin = chip->pins[line];
+  if (pin.fd >= 0)
+    return line;
+
+  pin.type = GPIO_TYPE_INPUT;
   pin.polarity = GPIO_ACTIVE_HIGH;
   pin.line = line;
   pin.edge = GPIO_EDGE_RISING;
   pin.fd = -1;
-  
-  chip->pins.push_back(pin);
-  return chip->pins.size()-1;
+
+  return line;
 }
 
 /**
@@ -180,7 +202,7 @@ find_or_init_chip(const std::string& chip)
  * Returns nullptr on failure
  */
 static gpio_dpvt*
-dpvt_create(const char* instio, enum gpio_type type)
+dpvt_create(const char* instio)
 {
   char buf[512];
   strncpy(buf, instio, sizeof(buf)-1);
@@ -217,7 +239,7 @@ dpvt_create(const char* instio, enum gpio_type type)
   dpvt->chip = pchip;
 
   /* add it to the chip */
-  dpvt->pin = gpio_find_or_add_pin(pchip, line, type);
+  dpvt->pin = gpio_find_or_add_pin(pchip, line);
 
   return dpvt;
 }
@@ -241,12 +263,14 @@ gpio_config_pin(gpio_chip* chip, int pin)
     return true;
 
   struct gpio_v2_line_request req = {};
-  req.num_lines = chip->pins.size();
   strcpy(req.consumer, "epics");
 
   /* 1 line per fd */
   req.offsets[0] = p.line;
   req.num_lines = 1;
+
+  /* might need tuning */
+  req.event_buffer_size = 128;
 
   req.config.num_attrs = 0;
   
@@ -266,6 +290,7 @@ gpio_reconfig_pin(gpio_chip* chip, int pin)
 {
   auto& p = chip->pins[pin];
   struct gpio_v2_line_config config = {};
+  const auto watch_flags = GPIO_V2_LINE_FLAG_EDGE_FALLING | GPIO_V2_LINE_FLAG_EDGE_RISING;
 
   /* set polarity flags */
   switch(p.polarity) {
@@ -290,18 +315,8 @@ gpio_reconfig_pin(gpio_chip* chip, int pin)
   
   /* for inputs, configure the edge */
   if (p.type == GPIO_TYPE_INPUT) {
-    /* configure the edge we're looking for */
-    switch(p.edge) {
-    case GPIO_EDGE_FALLING:
-      config.flags |= GPIO_V2_LINE_FLAG_EDGE_FALLING;
-      break;
-    case GPIO_EDGE_RISING:
-      config.flags |= GPIO_V2_LINE_FLAG_EDGE_RISING;
-      break;
-    default:
-      assert(0);
-    }
-    
+    config.flags |= watch_flags;
+
     /* configure pull up/down */
     switch(p.bias) {
     case GPIO_BIAS_PULL_DOWN:
@@ -347,11 +362,15 @@ gpio_reconfig_pin(gpio_chip* chip, int pin)
 
 static long devGpioBi_InitRecord(dbCommon* precord);
 static long devGpioBi_Read(biRecord* precord);
+static long devGpioBi_Init(int after);
+static long devGpioBi_GetIointInfo(int op, dbCommon* precord, IOSCANPVT* pvt);
 
 bidset devGpioBi = {
   .common = {
     .number = 5,
+    .init = devGpioBi_Init,
     .init_record = devGpioBi_InitRecord,
+    .get_ioint_info = devGpioBi_GetIointInfo,
   },
   .read_bi = devGpioBi_Read,
 };
@@ -359,14 +378,46 @@ bidset devGpioBi = {
 epicsExportAddress(dset, devGpioBi);
 
 static long
+devGpioBi_Init(int after)
+{
+  if (after == 0)
+    return 0;
+
+  /* Kick off the watcher threads for all chips */
+  for (auto& entry : s_chips) {
+    auto* pchip = entry.second;
+    pchip->thread = epicsThreadCreate("GPIO", epicsThreadPriorityHigh, 
+      epicsThreadStackMedium, gpio_thread_proc, pchip); 
+  }
+  return 0;
+}
+
+static long
 devGpioBi_InitRecord(dbCommon* precord)
 {
   auto* pbi = reinterpret_cast<biRecord*>(precord);
-  precord->dpvt = dpvt_create(pbi->inp.value.instio.string, GPIO_TYPE_INPUT);
+  precord->dpvt = dpvt_create(pbi->inp.value.instio.string);
 
   if (!precord->dpvt)
     return S_dev_badInpType;
 
+  return 0;
+}
+
+static long
+devGpioBi_ReadSample(biRecord* precord, gpio_pin& p)
+{
+  struct gpio_v2_line_values req = {};
+  req.bits = 1<<p.num;
+  req.mask = 1<<p.num;
+
+  if (ioctl(p.fd, GPIO_V2_LINE_GET_VALUES_IOCTL, &req) < 0) {
+    recGblSetSevrMsg(precord, COMM_ALARM, MAJOR_ALARM, "%s", strerror(errno));
+    perror("ioctl(GPIO_V2_LINE_GET_VALUES_IOCTL)");
+    return -1;
+  }
+
+  precord->rval = req.bits >> p.num;  
   return 0;
 }
 
@@ -378,18 +429,22 @@ devGpioBi_Read(biRecord* precord)
   if (p.type != GPIO_TYPE_INPUT)
     return 0; /* silently eat the error because we could have a scan rate */
 
-  struct gpio_v2_line_values req = {};
-  req.bits = 1<<p.num;
-  req.mask = 1<<p.num;
-
-  if (ioctl(p.fd, GPIO_V2_LINE_GET_VALUES_IOCTL, &req) < 0) {
-    recGblSetSevrMsg(precord, COMM_ALARM, MAJOR_ALARM, "%s", strerror(errno));
-    perror("ioctl(GPIO_V2_LINE_GET_VALUES_IOCTL)");
-    return -1;
+  /* if configured with a fixed scan rate, directly sample hardware w/ioctl */
+  if (precord->scan != menuScanI_O_Intr) {
+    return devGpioBi_ReadSample(precord, p);
+  }
+  else {
+    precord->rval = p.value & gpio_pin::VAL_ON;
   }
 
-  precord->rval = req.bits >> p.num;
+  return 0;
+}
 
+static long
+devGpioBi_GetIointInfo(int op, dbCommon* precord, IOSCANPVT* pvt)
+{
+  auto* dpvt = dpvt_get(precord);
+  *pvt = dpvt->chip->scan;
   return 0;
 }
 
@@ -422,7 +477,7 @@ static long
 devGpioBo_InitRecord(dbCommon* precord)
 {
   auto* pbo = reinterpret_cast<boRecord*>(precord);
-  auto* dpvt = dpvt_create(pbo->out.value.instio.string, GPIO_TYPE_OUTPUT);
+  auto* dpvt = dpvt_create(pbo->out.value.instio.string);
   precord->dpvt = dpvt;
 
   if (!precord->dpvt)
@@ -521,7 +576,7 @@ devGpioCfgMbbo_InitRecord(dbCommon* precord)
 
   auto* dpvt = new gpio_cfg_dpvt;
   dpvt->chip = find_or_init_chip(dev);
-  dpvt->pin = gpio_find_or_add_pin(dpvt->chip, line, GPIO_TYPE_INPUT);
+  dpvt->pin = gpio_find_or_add_pin(dpvt->chip, line);
   dpvt->param = p;
 
   precord->dpvt = dpvt;
@@ -562,4 +617,84 @@ devGpioCfgMbbo_WriteRecord(mbboRecord* precord)
   }
 
   return 0;
+}
+
+/**************************** Input Event Thread *****************************/
+
+/* NOTE: This code assumes that we have one fd per pin. */
+static void
+gpio_thread_read(gpio_chip* chip, int pin, int fd)
+{
+  gpio_v2_line_event events[64];
+  auto& p = chip->pins[pin];
+
+  ssize_t r = read(fd, events, sizeof(events));
+
+  uint32_t lowest = UINT32_MAX;
+  for (ssize_t i = 0; i < r / (ssize_t)sizeof(events[0]); ++i) {
+    int val = 0;
+    switch (events[i].id) {
+    case GPIO_V2_LINE_EVENT_RISING_EDGE:
+      val = 1;
+      p.value |= gpio_pin::VAL_RISING; break;
+    case GPIO_V2_LINE_EVENT_FALLING_EDGE:
+      p.value |= gpio_pin::VAL_FALLING; break;
+    }
+
+    /* I'm not sure if we can always assume gpio events will be ordered.
+     * So..instead of sorting the events buffer, we'll just track the lowest
+     * sequence number and assign value based on that */
+    if (events[i].line_seqno <= lowest) {
+      if (val)
+        p.value |= gpio_pin::VAL_ON;
+      else
+        p.value &= ~gpio_pin::VAL_ON;
+      lowest = events[i].line_seqno;
+      p.ts = events[i].timestamp_ns;
+    }
+  }
+}
+
+static void
+gpio_thread_proc(void* param)
+{
+  gpio_chip* chip = static_cast<gpio_chip*>(param);
+
+  struct pollfd fds[MAX_PINS_PER_CHIP] = {};
+  int num_open = 0;
+
+  for (int i = 0; i < MAX_PINS_PER_CHIP; ++i) {
+    if (chip->pins[i].fd < 0)
+      continue;
+    fds[i].fd = chip->pins[i].fd;
+    fds[i].events = POLLIN;
+    ++num_open;
+  }
+
+  while (num_open > 0) {
+    bool any_read = false;
+    int r = poll(fds, MAX_PINS_PER_CHIP, -1);
+    if (r < 0) {
+      perror("poll");
+      continue;
+    }
+
+    for (int i = 0; i < MAX_PINS_PER_CHIP; ++i) {
+      if (fds[i].revents == 0)
+        continue;
+
+      /* data ready for read */
+      if (fds[i].revents & POLLIN) {
+        gpio_thread_read(chip, i, fds[i].fd);
+        any_read = true;
+      }
+
+      if (fds[i].revents & (POLLERR|POLLHUP))
+        --num_open;
+    }
+
+    /* Kick off db scan now that we've updated values */
+    if (any_read)
+      scanIoRequest(chip->scan);
+  }
 }
