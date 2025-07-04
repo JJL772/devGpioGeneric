@@ -56,6 +56,7 @@ enum gpio_polarity {
 enum gpio_type {
   GPIO_TYPE_INPUT = 0,
   GPIO_TYPE_OUTPUT,
+  GPIO_TYPE_INPUT_LATCHED,
 };
 
 enum gpio_edge {
@@ -120,6 +121,16 @@ struct gpio_cfg_dpvt {
   struct gpio_chip* chip;
   int pin;
   enum gpio_cfg_param param;
+};
+
+enum gpio_bo_cfg_param {
+  GPIO_BO_CFG_RESET,
+};
+
+struct gpio_bo_cfg_dpvt {
+  struct gpio_chip* chip;
+  int pin;
+  gpio_bo_cfg_param param;
 };
 
 static std::map<std::string, gpio_chip*> s_chips;
@@ -201,8 +212,9 @@ find_or_init_chip(const std::string& chip)
  * Create a generic dpvt type for gpio device types
  * Returns nullptr on failure
  */
-static gpio_dpvt*
-dpvt_create(const char* instio)
+template<typename T>
+static T*
+dpvt_create(const char* instio, bool(*custom_parse)(T*, char* rem) = nullptr)
 {
   char buf[512];
   strncpy(buf, instio, sizeof(buf)-1);
@@ -211,13 +223,13 @@ dpvt_create(const char* instio)
   /* instio string in the following format:
    * @/dev/gpiochip13,1 */
 
-  const char* dev = strtok(buf, ",");
+  char* dev = strtok(buf, ",");
   if (!dev) {
     printf("Instio string missing dev specifier\n");
     return nullptr;
   }
-  
-  const char* num = strtok(nullptr, ",");
+
+  char* num = strtok(nullptr, ",");
   if (!num) {
     printf("Instio string missing num specifier\n");
     return nullptr;
@@ -228,14 +240,20 @@ dpvt_create(const char* instio)
     printf("Instio string has invalid num specifier. Must be an integer\n");
     return nullptr;
   }
-  
+
+  auto* dpvt = new T();
+  if (custom_parse && !custom_parse(dpvt, strtok(nullptr, ","))) {
+    delete dpvt;
+    return nullptr;
+  }
+
   auto* pchip = find_or_init_chip(dev);
   if (!pchip) {
     printf("No such gpio chip %s\n", dev);
+    delete dpvt;
     return nullptr;
   }
-  
-  auto* dpvt = new gpio_dpvt();
+
   dpvt->chip = pchip;
 
   /* add it to the chip */
@@ -244,11 +262,11 @@ dpvt_create(const char* instio)
   return dpvt;
 }
 
-template<typename RecT>
-static gpio_dpvt*
+template<typename T, typename RecT>
+static T*
 dpvt_get(RecT* prec)
 {
-  return static_cast<gpio_dpvt*>( prec->dpvt );
+  return static_cast<T*>( prec->dpvt );
 }
 
 /**
@@ -304,6 +322,7 @@ gpio_reconfig_pin(gpio_chip* chip, int pin)
   /* set type flags */
   switch (p.type) {
   case GPIO_TYPE_INPUT:
+  case GPIO_TYPE_INPUT_LATCHED:
     config.flags |= GPIO_V2_LINE_FLAG_INPUT;
     break;
   case GPIO_TYPE_OUTPUT:
@@ -314,7 +333,7 @@ gpio_reconfig_pin(gpio_chip* chip, int pin)
   }
   
   /* for inputs, configure the edge */
-  if (p.type == GPIO_TYPE_INPUT) {
+  if (p.type == GPIO_TYPE_INPUT || p.type == GPIO_TYPE_INPUT_LATCHED) {
     config.flags |= watch_flags;
 
     /* configure pull up/down */
@@ -396,7 +415,7 @@ static long
 devGpioBi_InitRecord(dbCommon* precord)
 {
   auto* pbi = reinterpret_cast<biRecord*>(precord);
-  precord->dpvt = dpvt_create(pbi->inp.value.instio.string);
+  precord->dpvt = dpvt_create<gpio_dpvt>(pbi->inp.value.instio.string);
 
   if (!precord->dpvt)
     return S_dev_badInpType;
@@ -424,10 +443,19 @@ devGpioBi_ReadSample(biRecord* precord, gpio_pin& p)
 static long
 devGpioBi_Read(biRecord* precord)
 {
-  auto* dpvt = dpvt_get(precord);
+  auto* dpvt = dpvt_get<gpio_dpvt>(precord);
   auto& p = dpvt->chip->pins[dpvt->pin];
-  if (p.type != GPIO_TYPE_INPUT)
-    return 0; /* silently eat the error because we could have a scan rate */
+  if (p.type == GPIO_TYPE_OUTPUT)
+    return 0; /* silently eat the error. This will likely get triggered even if
+               * the pin is in output mode */
+
+  /* latched input types */
+  if (p.type == GPIO_TYPE_INPUT_LATCHED) {
+    /* Should always return rising even if polarity is the opposite. The
+     * gpio kernel module will give us rising edges accordingly. */
+    precord->rval = !!(p.value & gpio_pin::VAL_RISING);
+    return 0;
+  }
 
   /* if configured with a fixed scan rate, directly sample hardware w/ioctl */
   if (precord->scan != menuScanI_O_Intr) {
@@ -443,7 +471,7 @@ devGpioBi_Read(biRecord* precord)
 static long
 devGpioBi_GetIointInfo(int op, dbCommon* precord, IOSCANPVT* pvt)
 {
-  auto* dpvt = dpvt_get(precord);
+  auto* dpvt = dpvt_get<gpio_dpvt>(precord);
   *pvt = dpvt->chip->scan;
   return 0;
 }
@@ -477,7 +505,7 @@ static long
 devGpioBo_InitRecord(dbCommon* precord)
 {
   auto* pbo = reinterpret_cast<boRecord*>(precord);
-  auto* dpvt = dpvt_create(pbo->out.value.instio.string);
+  auto* dpvt = dpvt_create<gpio_dpvt>(pbo->out.value.instio.string);
   precord->dpvt = dpvt;
 
   if (!precord->dpvt)
@@ -492,7 +520,7 @@ devGpioBo_InitRecord(dbCommon* precord)
 static long
 devGpioBo_Write(boRecord* precord)
 {
-  auto* dpvt = dpvt_get(precord);
+  auto* dpvt = dpvt_get<gpio_dpvt>(precord);
   auto& p = dpvt->chip->pins[dpvt->pin];
   if (p.type != GPIO_TYPE_OUTPUT)
     return -1;
@@ -505,6 +533,75 @@ devGpioBo_Write(boRecord* precord)
     recGblSetSevrMsg(precord, COMM_ALARM, MAJOR_ALARM, "%s", strerror(errno));
     perror("ioctl(GPIO_V2_LINE_SET_VALUES_IOCTL)");
     return -1;
+  }
+
+  return 0;
+}
+
+/**************************** devGpioCfgBo *****************************/
+
+static long devGpioCfgBo_InitRecord(dbCommon* precord);
+static long devGpioCfgBo_Write(boRecord* precord);
+
+bodset devGpioCfgBo = {
+  .common {
+    .number = 5,
+    .init_record = devGpioCfgBo_InitRecord,
+  },
+  .write_bo = devGpioCfgBo_Write,
+};
+
+epicsExportAddress(dset, devGpioCfgBo);
+
+static bool
+devGpioCfgBo_ParseInstio(gpio_bo_cfg_dpvt* dpvt, char* rem)
+{
+  char* param = strtok(rem, ",");
+  if (!param) {
+    printf("%s: Bad param type\n", __func__);
+    return false;
+  }
+
+  if (!strcmp(param, "reset"))
+    dpvt->param = GPIO_BO_CFG_RESET;
+  else {
+    printf("%s: Bad cfg param\n", __func__);
+    return false;
+  }
+  return true;
+}
+
+static long
+devGpioCfgBo_InitRecord(dbCommon* precord)
+{
+  auto* pbo = reinterpret_cast<boRecord*>(precord);
+  auto* dpvt = dpvt_create<gpio_bo_cfg_dpvt>(pbo->out.value.instio.string, devGpioCfgBo_ParseInstio);
+
+  if (!dpvt)
+    return S_dev_badOutType;
+
+  pbo->dpvt = dpvt;
+  return 0;
+}
+
+static long
+devGpioCfgBo_Write(boRecord* precord)
+{
+  auto* dpvt = dpvt_get<gpio_bo_cfg_dpvt>(precord);
+
+  switch (dpvt->param) {
+  case GPIO_BO_CFG_RESET:
+    if (!precord->rval)
+      return 0;
+
+    dpvt->chip->pins[dpvt->pin].value &= 
+      ~(gpio_pin::VAL_FALLING | gpio_pin::VAL_RISING);
+
+    /* request a scan to update the values */
+    scanIoRequest(dpvt->chip->scan);
+    break;
+  default:
+    assert(0);
   }
 
   return 0;
@@ -537,25 +634,25 @@ devGpioCfgMbbo_InitRecord(dbCommon* precord)
   const char* dev = strtok(str, ",");
   if (!dev) {
     printf("instio string missing 'dev' specifier\n");
-    return S_dev_badInpType;
+    return S_dev_badOutType;
   }
   
   const char* pin = strtok(NULL, ",");
   if (!pin) {
     printf("instio string missing 'pin' specifier\n");
-    return S_dev_badInpType;
+    return S_dev_badOutType;
   }
   
   epicsUInt32 line;
   if (epicsParseUInt32(pin, &line, 10, NULL) != 0) {
     printf("instio string missing 'pin' specifier\n");
-    return S_dev_badInpType;
+    return S_dev_badOutType;
   }
   
   const char* param = strtok(NULL, ",");
   if (!param) {
     printf("instio string missing 'param' specifier\n");
-    return S_dev_badInpType;
+    return S_dev_badOutType;
   }
   
   enum gpio_cfg_param p;
@@ -571,7 +668,7 @@ devGpioCfgMbbo_InitRecord(dbCommon* precord)
     p = GPIO_CFG_DRIVE;
   else {
     printf("instio string has unknown cfg type '%s'\n", param);
-    return S_dev_badInpType;
+    return S_dev_badOutType;
   }
 
   auto* dpvt = new gpio_cfg_dpvt;

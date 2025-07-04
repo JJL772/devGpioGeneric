@@ -38,6 +38,8 @@ record(mbbo, "$(P)GPIO$(N)_TYPE")
     field(ZRVL, "0")
     field(ONST, "Output")
     field(ONVL, "1")
+    field(TWST, "InputLatched")
+    field(TWVL, "2")
     field(PINI, "YES")
 }
 
@@ -81,4 +83,12 @@ record(mbbo, "$(P)GPIO$(N)_BIAS")
     field(ONVL, "1")
     field(TWST, "Pull Up")
     field(TWVL, "1")
+}
+
+record(bo, "$(P)GPIO$(N)_RESET")
+{
+    field(DTYP, "devGpioCfgBo")
+    field(DESC, "Reset latched input values")
+    field(OUT, "@$(CHIP),$(N),reset")
+    field(VAL, "0")
 }
