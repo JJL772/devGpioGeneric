@@ -30,6 +30,7 @@
 #include <epicsAtomic.h>
 #include <iocInit.h>
 #include <initHooks.h>
+#include <longoutRecord.h>
 
 #include <linux/gpio.h>
 #include <fcntl.h>
@@ -92,6 +93,7 @@ struct gpio_pin {
   enum gpio_edge edge = GPIO_EDGE_RISING;
   enum gpio_bias bias = GPIO_BIAS_NONE;
   enum gpio_drive drive = GPIO_DRIVE_PUSH_PULL;
+  uint32_t debounce_us = 0; /* debounce period, us */
   uint64_t ts;         /* hardware/kernel timestamp */
 };
 
@@ -131,6 +133,16 @@ struct gpio_bo_cfg_dpvt {
   struct gpio_chip* chip;
   int pin;
   gpio_bo_cfg_param param;
+};
+
+enum gpio_lo_cfg_param {
+  GPIO_LO_CFG_DEBOUNCE,
+};
+
+struct gpio_lo_cfg_dpvt {
+  struct gpio_chip* chip;
+  int pin;
+  gpio_lo_cfg_param param;
 };
 
 static std::map<std::string, gpio_chip*> s_chips;
@@ -369,6 +381,12 @@ gpio_reconfig_pin(gpio_chip* chip, int pin)
   }
   
   config.num_attrs = 0;
+
+  if (p.type == GPIO_TYPE_INPUT) {
+    config.num_attrs = 1;
+    config.attrs[0].attr.debounce_period_us = p.debounce_us;
+    config.attrs[0].mask = 1<<p.num;
+  }
 
   if (ioctl(p.fd, GPIO_V2_LINE_SET_CONFIG_IOCTL, &config) < 0) {
     perror("ioctl(GPIO_V2_LINE_SET_CONFIG_IOCTL)");
@@ -715,6 +733,77 @@ devGpioCfgMbbo_WriteRecord(mbboRecord* precord)
 
   return 0;
 }
+
+/**************************** devGpioCfgLo *****************************/
+
+static long devGpioCfgLo_InitRecord(dbCommon* precord);
+static long devGpioCfgLo_WriteRecord(longoutRecord* precord);
+
+longoutdset devGpioCfgLo = {
+  .common = {
+    .number = 5,
+    .init_record = devGpioCfgLo_InitRecord,
+  },
+  .write_longout = devGpioCfgLo_WriteRecord
+};
+
+static bool
+devGpioCfgLo_ParseInstio(gpio_lo_cfg_dpvt* dpvt, char* rem)
+{
+  char* param = strtok(rem, ",");
+  if (!param) {
+    printf("%s: Bad param type\n", __func__);
+    return false;
+  }
+
+  if (!strcmp(param, "debounce"))
+    dpvt->param = GPIO_LO_CFG_DEBOUNCE;
+  else {
+    printf("%s: Bad cfg param\n", __func__);
+    return false;
+  }
+  return true;
+}
+
+static long
+devGpioCfgLo_InitRecord(dbCommon* precord)
+{
+  auto* plo = reinterpret_cast<longoutRecord*>(precord);
+  auto* dpvt = dpvt_create<gpio_lo_cfg_dpvt>(plo->out.value.instio.string, devGpioCfgLo_ParseInstio);
+
+  if (!dpvt)
+    return S_dev_badOutType;
+
+  plo->dpvt = dpvt;
+  return 0;
+}
+
+static long
+devGpioCfgLo_WriteRecord(longoutRecord* precord)
+{
+  auto* dpvt = dpvt_get<gpio_lo_cfg_dpvt>(precord);
+  if (!dpvt)
+    return 1;
+
+  auto& p = dpvt->chip->pins[dpvt->pin];
+
+  switch (dpvt->param) {
+  case GPIO_LO_CFG_DEBOUNCE:
+    p.debounce_us = precord->val;
+    break;
+  default:
+    assert(0);
+  }
+
+  if (!gpio_reconfig_pin(dpvt->chip, dpvt->pin)) {
+    recGblSetSevr(precord, COMM_ALARM, MAJOR_ALARM);
+    return 1;
+  }
+
+  return 0;
+}
+
+epicsExportAddress(dset, devGpioCfgLo);
 
 /**************************** Input Event Thread *****************************/
 

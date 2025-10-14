@@ -92,3 +92,12 @@ record(bo, "$(P)GPIO$(N)_RESET")
     field(OUT, "@$(CHIP),$(N),reset")
     field(VAL, "0")
 }
+
+record(longout, "$(P)GPIO$(N)_DEBOUNCE")
+{
+    field(DTYP, "devGpioCfgLo")
+    field(DESC, "Debounce period (us)")
+    field(OUT, "@$(CHIP),$(N),debounce")
+    field(VAL, "0")
+    field(PINI, "YES")
+}
