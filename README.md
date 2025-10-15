@@ -20,6 +20,7 @@ Each pin has the following associated records, where `$(P)` is provided by the I
 | `$(P)GPIO$(N)_DRIVE` | mbbo | Drive type for outputs. Default is "Push/Pull" | 
 | `$(P)GPIO$(N)_BIAS` | mbbo | Bias for inputs. Default is "None" |
 | `$(P)GPIO$(N)_RESET` | bo | Resets the value when the pin is configured as a latched input |
+| `$(P)GPIO$(N)_DEBOUNCE` | longin | Debounce sampling period in microseconds. Only relevant for input pins |
 
 ## Outputs
 
