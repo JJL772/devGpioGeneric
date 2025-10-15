@@ -12,7 +12,7 @@ include $(TOP)/configure/CONFIG
 #=============================
 # Build the IOC application
 
-PROD_IOC = devGpioGenericTest
+PROD_IOC_Linux = devGpioGenericTest
 # devGpioGenericTest.dbd will be created and installed
 DBD += devGpioGenericTest.dbd
 

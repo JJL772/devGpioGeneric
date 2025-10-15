@@ -12,7 +12,7 @@ include $(TOP)/configure/CONFIG
 #==================================================
 # build a support library
 
-LIBRARY_IOC += devGpioGeneric
+LIBRARY_IOC_Linux += devGpioGeneric
 
 # xxxRecord.h will be created from xxxRecord.dbd
 #DBDINC += xxxRecord
