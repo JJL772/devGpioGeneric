@@ -545,7 +545,7 @@ devGpioBo_Write(boRecord* precord)
 
   struct gpio_v2_line_values req = {};
   req.mask = 1 << p.num;
-  req.bits = precord->val << p.num;
+  req.bits = (!!precord->rval) << p.num;
 
   if (ioctl(p.fd, GPIO_V2_LINE_SET_VALUES_IOCTL, &req) < 0) {
     recGblSetSevrMsg(precord, COMM_ALARM, MAJOR_ALARM, "%s", strerror(errno));
@@ -705,22 +705,22 @@ devGpioCfgMbbo_WriteRecord(mbboRecord* precord)
   auto* dpvt = static_cast<gpio_cfg_dpvt*>(precord->dpvt);
 
   auto& p = dpvt->chip->pins[dpvt->pin];
-  
+
   switch (dpvt->param) {
   case GPIO_CFG_EDGE:
-    p.edge = static_cast<gpio_edge>(precord->val);
+    p.edge = static_cast<gpio_edge>(precord->rval);
     break;
   case GPIO_CFG_POLARITY:
-    p.polarity = static_cast<gpio_polarity>(precord->val);
+    p.polarity = static_cast<gpio_polarity>(precord->rval);
     break;
   case GPIO_CFG_TYPE:
-    p.type = static_cast<gpio_type>(precord->val);
+    p.type = static_cast<gpio_type>(precord->rval);
     break;
   case GPIO_CFG_BIAS:
-    p.bias = static_cast<gpio_bias>(precord->val);
+    p.bias = static_cast<gpio_bias>(precord->rval);
     break;
   case GPIO_CFG_DRIVE:
-    p.drive = static_cast<gpio_drive>(precord->val);
+    p.drive = static_cast<gpio_drive>(precord->rval);
     break;
   default:
     assert(0);
