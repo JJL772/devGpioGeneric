@@ -12,6 +12,7 @@ include $(TOP)/configure/CONFIG
 # databases, templates, substitutions like this
 DB += rp5.db
 DB += aquila-am69-dev.db
+DB += pin.template
 
 #----------------------------------------------------
 # If <anyname>.db template is not named <anyname>*.template add
