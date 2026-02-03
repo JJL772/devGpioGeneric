@@ -11,17 +11,17 @@ Other devices supporting the Linux GPIO driver will work, but need DB templates 
 
 ## Records
 
-Each pin has the following associated records, where `$(P)` is provided by the IOC and `$(N)` is substituted with the pin number.
+Each pin has the following associated records, where `$(P)` is provided by the IOC, `$(C)` is the gpio chip number and `$(N)` is the pin number.
 | Record Name | Type | Description |
 |---|---|---|
-| `$(P)GPIO$(N)_OUT` | bo | Output value, used when the pin is configured as an output |
-| `$(P)GPIO$(N)_IN` | bi | Input value, used when the pin is configured as an input |
-| `$(P)GPIO$(N)_POLARITY` | mbbo | Polarity for outputs. Default is "active high" |
-| `$(P)GPIO$(N)_TYPE` | mbbo | Pin type. Default is Input |
-| `$(P)GPIO$(N)_DRIVE` | mbbo | Drive type for outputs. Default is "Push/Pull" | 
-| `$(P)GPIO$(N)_BIAS` | mbbo | Bias for inputs. Default is "None" |
-| `$(P)GPIO$(N)_RESET` | bo | Resets the value when the pin is configured as a latched input |
-| `$(P)GPIO$(N)_DEBOUNCE` | longin | Debounce sampling period in microseconds. Only relevant for input pins |
+| `$(P)GPIO$(C)_L$(N)_OUT` | bo | Output value, used when the pin is configured as an output |
+| `$(P)GPIO$(C)_L$(N)_IN` | bi | Input value, used when the pin is configured as an input |
+| `$(P)GPIO$(C)_L$(N)_POLARITY` | mbbo | Polarity for outputs. Default is "active high" |
+| `$(P)GPIO$(C)_L$(N)_TYPE` | mbbo | Pin type. Default is Input |
+| `$(P)GPIO$(C)_L$(N)_DRIVE` | mbbo | Drive type for outputs. Default is "Push/Pull" | 
+| `$(P)GPIO$(C)_L$(N)_BIAS` | mbbo | Bias for inputs. Default is "None" |
+| `$(P)GPIO$(C)_L$(N)_RESET` | bo | Resets the value when the pin is configured as a latched input |
+| `$(P)GPIO$(C)_L$(N)_DEBOUNCE` | longin | Debounce sampling period in microseconds. Only relevant for input pins |
 
 ## Outputs
 
